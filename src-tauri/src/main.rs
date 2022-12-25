@@ -7,12 +7,14 @@ mod website;
 
 use std::error::Error;
 
-use tauri::window::{Monitor, Window, WindowBuilder};
-use tauri::utils::config::WindowUrl;
 use tauri::api::dialog;
+use tauri::utils::config::WindowUrl;
+use tauri::window::{Monitor, Window, WindowBuilder};
 use tauri::Manager;
-use tauri::{CustomMenuItem, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTraySubmenu, SystemTrayMenuItem};
-
+use tauri::{
+    CustomMenuItem, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
+    SystemTraySubmenu,
+};
 
 fn reset(window: &Window) -> () {
     if let Some(monitor) = window.current_monitor().unwrap() {
@@ -31,48 +33,50 @@ fn reset(window: &Window) -> () {
     }
 }
 
-
 fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEvent) -> () {
     match event {
         SystemTrayEvent::DoubleClick { .. } => {
             for window in app.windows().into_values().into_iter() {
-                window.hide().unwrap();
                 if window.is_visible().unwrap() {
                     window.hide().unwrap();
-                    return ()
+                    return ();
                 }
             }
             if let Some(config_dir) = app.path_resolver().app_config_dir() {
-                let website_info = website::WebSiteInfo::from_json(config_dir.join("websites.json")).unwrap();
-                app.get_window(&website_info.default).unwrap().show().unwrap();
+                let website_info =
+                    website::WebSiteInfo::from_json(config_dir.join("websites.json")).unwrap();
+                app.get_window(&website_info.default)
+                    .unwrap()
+                    .show()
+                    .unwrap();
             }
         }
-        SystemTrayEvent::MenuItemClick { id, .. } => {
-            let item_handle = app.tray_handle().get_item(&id);
-            match id.as_str() {
-                "quit" => {
-                    std::process::exit(0);
+        SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+            "quit" => {
+                app.exit(0);
+            }
+            "hide" => {
+                for window in app.windows().into_values().into_iter() {
+                    window.hide().unwrap();
                 }
-                "hide" => {
-                    for window in app.windows().into_values().into_iter() {
-                        window.hide().unwrap();
-                    }
-                    item_handle.set_enabled(false).unwrap();
-                }
-                "reset" => {
-                    for window in app.windows().into_values().into_iter() {
-                        reset(&window);
-                    }
-                }
-                label => {
-                    for window in app.windows().into_values().into_iter() {
-                        window.hide().unwrap();
-                    }
-                    app.get_window(label).unwrap().show().unwrap();
-                    app.tray_handle().get_item("hide").set_enabled(true).unwrap();
+                app.tray_handle().get_item(&id).set_enabled(false).unwrap();
+            }
+            "reset" => {
+                for window in app.windows().into_values().into_iter() {
+                    reset(&window);
                 }
             }
-        }
+            label => {
+                for window in app.windows().into_values().into_iter() {
+                    window.hide().unwrap();
+                }
+                app.get_window(label).unwrap().show().unwrap();
+                app.tray_handle()
+                    .get_item("hide")
+                    .set_enabled(true)
+                    .unwrap();
+            }
+        },
         _ => {}
     }
 }
@@ -87,35 +91,45 @@ fn run_handler(app: &tauri::AppHandle, event: tauri::RunEvent) {
                     .set_enabled(false)
                     .unwrap();
                 app.get_window(&*label).unwrap().hide().unwrap();
-                app.tray_handle().get_item(&*label).set_selected(false).unwrap();
+                app.tray_handle()
+                    .get_item(&*label)
+                    .set_selected(false)
+                    .unwrap();
             }
             _ => {}
-        }
+        },
         _ => {}
     }
 }
 
-fn setup_handler(app: & mut tauri::App) -> Result<(), Box<dyn Error>> {
+fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     if let Some(config_dir) = app.path_resolver().app_config_dir() {
         let websites_path = config_dir.join("websites.json");
-        if ! websites_path.is_file() {
+        if !websites_path.is_file() {
             let err_msg = format!("{} does not exist!", websites_path.display());
             dialog::blocking::MessageDialogBuilder::new("Error!", err_msg.clone()).show();
-            return Err(err_msg.into())
+            return Err(err_msg.into());
         }
         let website_info = website::WebSiteInfo::from_json(websites_path).unwrap();
         let mut sub_menu = SystemTrayMenu::new();
         for website in website_info.websites.clone().into_iter() {
-            let window = WindowBuilder::new(app, website.name.clone(), WindowUrl::External(website.url.parse().unwrap()))
-                .skip_taskbar(true)
-                .decorations(false)
-                .title(&website.name)
-                .build()?;
+            let window = WindowBuilder::new(
+                app,
+                website.name.clone(),
+                WindowUrl::External(website.url.parse().unwrap()),
+            )
+            .skip_taskbar(true)
+            .decorations(false)
+            .title(&website.name)
+            .build()?;
             if website.name != website_info.default {
                 window.hide().unwrap();
             }
             reset(&window);
-            sub_menu = sub_menu.add_item(CustomMenuItem::new(website.name.clone(), website.name.clone()));
+            sub_menu = sub_menu.add_item(CustomMenuItem::new(
+                website.name.clone(),
+                website.name.clone(),
+            ));
         }
 
         let tray_menu = SystemTrayMenu::new()
@@ -128,14 +142,14 @@ fn setup_handler(app: & mut tauri::App) -> Result<(), Box<dyn Error>> {
         let system_tray = SystemTray::new().with_menu(tray_menu);
         system_tray.build(app)?;
         if None == website_info.slider {
-            return Ok(())
+            return Ok(());
         }
         let handle = app.handle();
         let websites = website_info.websites;
         let duration = website_info.slider.unwrap();
         tauri::async_runtime::spawn(async move {
             if websites.len() < 1 {
-                return ()
+                return ();
             }
             let first_label = websites[0].name.clone();
             loop {
@@ -153,7 +167,7 @@ fn setup_handler(app: & mut tauri::App) -> Result<(), Box<dyn Error>> {
                         window.hide().unwrap();
                     }
                 }
-                if ! has_shown {
+                if !has_shown {
                     continue;
                 }
                 handle.get_window(&first_label).unwrap().show().unwrap();
@@ -161,10 +175,10 @@ fn setup_handler(app: & mut tauri::App) -> Result<(), Box<dyn Error>> {
         });
         Ok(())
     } else {
-        Err("no config_dir: {}".into())
+        dialog::blocking::MessageDialogBuilder::new("Error!", "no config_dir").show();
+        Err("no config_dir".into())
     }
 }
-
 
 fn main() {
     tauri::Builder::default()
