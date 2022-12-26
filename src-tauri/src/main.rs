@@ -45,10 +45,14 @@ fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEve
             if let Some(config_dir) = app.path_resolver().app_config_dir() {
                 let website_info =
                     website::WebSiteInfo::from_json(config_dir.join("websites.json")).unwrap();
-                app.get_window(&website_info.default)
-                    .unwrap()
-                    .show()
-                    .unwrap();
+                for (i, website) in website_info.websites.into_iter().enumerate() {
+                    if website.name == website_info.default {
+                        app.get_window(&format!("window-{}", i))
+                            .unwrap()
+                            .show()
+                            .unwrap();
+                    }
+                }
             }
         }
         SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
@@ -112,10 +116,11 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         }
         let website_info = website::WebSiteInfo::from_json(websites_path).unwrap();
         let mut sub_menu = SystemTrayMenu::new();
-        for website in website_info.websites.clone().into_iter() {
+        for (i, website) in website_info.websites.clone().into_iter().enumerate() {
+            let label = format!("window-{}", i);
             let window = WindowBuilder::new(
                 app,
-                website.name.clone(),
+                label.clone(),
                 WindowUrl::External(website.url.parse().unwrap()),
             )
             .skip_taskbar(true)
@@ -126,14 +131,11 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
                 window.hide().unwrap();
             }
             reset(&window);
-            sub_menu = sub_menu.add_item(CustomMenuItem::new(
-                website.name.clone(),
-                website.name.clone(),
-            ));
+            sub_menu = sub_menu.add_item(CustomMenuItem::new(label, website.name.clone()));
         }
 
         let tray_menu = SystemTrayMenu::new()
-            .add_submenu(SystemTraySubmenu::new("Windows", sub_menu))
+            .add_submenu(SystemTraySubmenu::new("Websites", sub_menu))
             .add_native_item(SystemTrayMenuItem::Separator)
             .add_item(CustomMenuItem::new("reset".to_string(), "Reset"))
             .add_item(CustomMenuItem::new("hide".to_string(), "Hide"))
@@ -144,19 +146,19 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         if None == website_info.slider {
             return Ok(());
         }
+        let websites_count = website_info.websites.len();
+        if websites_count < 1 {
+            return Ok(());
+        }
         let handle = app.handle();
-        let websites = website_info.websites;
         let duration = website_info.slider.unwrap();
         tauri::async_runtime::spawn(async move {
-            if websites.len() < 1 {
-                return ();
-            }
-            let first_label = websites[0].name.clone();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(duration));
                 let mut has_shown = false;
-                for website in websites.clone().into_iter() {
-                    let window = handle.get_window(&website.name).unwrap();
+                for i in 0..websites_count {
+                    let label = format!("window-{}", i);
+                    let window = handle.get_window(&label).unwrap();
                     if has_shown {
                         window.show().unwrap();
                         has_shown = false;
@@ -170,7 +172,7 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
                 if !has_shown {
                     continue;
                 }
-                handle.get_window(&first_label).unwrap().show().unwrap();
+                handle.get_window("window-0").unwrap().show().unwrap();
             }
         });
         Ok(())
