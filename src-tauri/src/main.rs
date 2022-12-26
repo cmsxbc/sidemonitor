@@ -98,10 +98,6 @@ fn run_handler(app: &tauri::AppHandle, event: tauri::RunEvent) {
                     .set_enabled(false)
                     .unwrap();
                 app.get_window(&*label).unwrap().hide().unwrap();
-                app.tray_handle()
-                    .get_item(&*label)
-                    .set_selected(false)
-                    .unwrap();
             }
             _ => {}
         },
