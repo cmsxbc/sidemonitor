@@ -105,15 +105,26 @@ fn run_handler(app: &tauri::AppHandle, event: tauri::RunEvent) {
     }
 }
 
+fn get_website_info(
+    websites_path: std::path::PathBuf,
+) -> Result<website::WebSiteInfo, Box<dyn Error>> {
+    if !websites_path.is_file() {
+        let err_msg = format!("{} does not exist!", websites_path.display());
+        dialog::blocking::MessageDialogBuilder::new("Error!", err_msg.clone()).show();
+        return Err(err_msg.into());
+    }
+    match website::WebSiteInfo::from_json(websites_path) {
+        Ok(website_info) => Ok(website_info),
+        Err(err_msg) => {
+            dialog::blocking::MessageDialogBuilder::new("Error!", format!("{}", err_msg)).show();
+            Err(err_msg)
+        }
+    }
+}
+
 fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     if let Some(config_dir) = app.path_resolver().app_config_dir() {
-        let websites_path = config_dir.join("websites.json");
-        if !websites_path.is_file() {
-            let err_msg = format!("{} does not exist!", websites_path.display());
-            dialog::blocking::MessageDialogBuilder::new("Error!", err_msg.clone()).show();
-            return Err(err_msg.into());
-        }
-        let website_info = website::WebSiteInfo::from_json(websites_path).unwrap();
+        let website_info = get_website_info(config_dir.join("websites.json")).unwrap();
         let mut sub_menu = SystemTrayMenu::new();
         for (i, website) in website_info.websites.clone().into_iter().enumerate() {
             let label = format!("window-{}", i);
