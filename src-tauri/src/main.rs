@@ -70,6 +70,9 @@ fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEve
                     reset(&window);
                 }
             }
+            "restart" => {
+                app.restart();
+            }
             label => {
                 for window in app.windows().into_values().into_iter() {
                     window.hide().unwrap();
@@ -138,6 +141,7 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
             .add_submenu(SystemTraySubmenu::new("Websites", sub_menu))
             .add_native_item(SystemTrayMenuItem::Separator)
             .add_item(CustomMenuItem::new("reset".to_string(), "Reset"))
+            .add_item(CustomMenuItem::new("restart".to_string(), "Restart"))
             .add_item(CustomMenuItem::new("hide".to_string(), "Hide"))
             .add_native_item(SystemTrayMenuItem::Separator)
             .add_item(CustomMenuItem::new("quit".to_string(), "Quit"));
@@ -146,8 +150,7 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         if None == website_info.slider {
             return Ok(());
         }
-        let websites_count = website_info.websites.len();
-        if websites_count < 1 {
+        if website_info.websites.len() < 1 {
             return Ok(());
         }
         let handle = app.handle();
@@ -155,6 +158,10 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         tauri::async_runtime::spawn(async move {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(duration));
+                let websites_count = handle.windows().len();
+                if websites_count < 1 {
+                    continue;
+                }
                 let mut has_shown = false;
                 for i in 0..websites_count {
                     let label = format!("window-{}", i);
