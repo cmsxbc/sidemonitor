@@ -6,6 +6,7 @@
 mod website;
 
 use std::error::Error;
+use std::sync::Mutex;
 
 use tauri::api::dialog;
 use tauri::utils::config::WindowUrl;
@@ -15,6 +16,19 @@ use tauri::{
     CustomMenuItem, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
     SystemTraySubmenu,
 };
+
+
+struct WebsiteState {
+    current_id: Mutex<usize>,
+    website_info: website::WebSiteInfo
+}
+
+
+struct AppState {
+    website: Mutex<Option<WebsiteState>>,
+    visible: Mutex<bool>
+}
+
 
 fn reset(window: &Window) -> () {
     if let Some(monitor) = window.current_monitor().unwrap() {
@@ -33,37 +47,36 @@ fn reset(window: &Window) -> () {
     }
 }
 
+fn trigger_visible(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let mut visible = state.visible.lock().unwrap();
+    if *visible {
+        *visible = false;
+        let website = state.website.lock().unwrap();
+        let current_id = website.as_ref().unwrap().current_id.lock().unwrap();
+        app.get_window(&format!("window-{}", *current_id)).unwrap().hide().unwrap();
+        app.tray_handle().get_item("visible").set_title("Show").unwrap();
+    } else {
+        *visible = true;
+        let website = state.website.lock().unwrap();
+        let current_id = website.as_ref().unwrap().current_id.lock().unwrap();
+        app.get_window(&format!("window-{}", *current_id)).unwrap().show().unwrap();
+        app.tray_handle().get_item("visible").set_title("Hide").unwrap();
+    }
+}
+
+
 fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEvent) -> () {
     match event {
         SystemTrayEvent::DoubleClick { .. } => {
-            for window in app.windows().into_values().into_iter() {
-                if window.is_visible().unwrap() {
-                    window.hide().unwrap();
-                    return ();
-                }
-            }
-            if let Some(config_dir) = app.path_resolver().app_config_dir() {
-                let website_info =
-                    website::WebSiteInfo::from_json(config_dir.join("websites.json")).unwrap();
-                for (i, website) in website_info.websites.into_iter().enumerate() {
-                    if website.name == website_info.default {
-                        app.get_window(&format!("window-{}", i))
-                            .unwrap()
-                            .show()
-                            .unwrap();
-                    }
-                }
-            }
+            trigger_visible(app);
         }
         SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
             "quit" => {
                 app.exit(0);
             }
-            "hide" => {
-                for window in app.windows().into_values().into_iter() {
-                    window.hide().unwrap();
-                }
-                app.tray_handle().get_item(&id).set_enabled(false).unwrap();
+            "visible" => {
+                trigger_visible(app);
             }
             "reset" => {
                 for window in app.windows().into_values().into_iter() {
@@ -74,14 +87,19 @@ fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEve
                 app.restart();
             }
             label => {
-                for window in app.windows().into_values().into_iter() {
-                    window.hide().unwrap();
-                }
+                let (_, id_str) = label.split_once("-").unwrap();
+                let chosen_id: usize = id_str.parse().unwrap();
+                let state = app.state::<AppState>();
+                let website = state.website.lock().unwrap();
+                let mut current_id = website.as_ref().unwrap().current_id.lock().unwrap();
+                app.get_window(&format!("window-{}", *current_id)).unwrap().hide().unwrap();
+                *current_id = chosen_id;
                 app.get_window(label).unwrap().show().unwrap();
                 app.tray_handle()
-                    .get_item("hide")
-                    .set_enabled(true)
+                    .get_item("visible")
+                    .set_title("Hide")
                     .unwrap();
+                *state.visible.lock().unwrap() = true;
             }
         },
         _ => {}
@@ -90,14 +108,10 @@ fn system_tray_event_handler(app: &tauri::AppHandle, event: tauri::SystemTrayEve
 
 fn run_handler(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
-        tauri::RunEvent::WindowEvent { label, event, .. } => match event {
+        tauri::RunEvent::WindowEvent { event, .. } => match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                app.tray_handle()
-                    .get_item("hide")
-                    .set_enabled(false)
-                    .unwrap();
-                app.get_window(&*label).unwrap().hide().unwrap();
+                trigger_visible(app);
             }
             _ => {}
         },
@@ -125,6 +139,8 @@ fn get_website_info(
 fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     if let Some(config_dir) = app.path_resolver().app_config_dir() {
         let website_info = get_website_info(config_dir.join("websites.json")).unwrap();
+        let state = app.state::<AppState>();
+        let mut current_id = 0;
         let mut sub_menu = SystemTrayMenu::new();
         for (i, website) in website_info.websites.clone().into_iter().enumerate() {
             let label = format!("window-{}", i);
@@ -139,17 +155,20 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
             .build()?;
             if website.name != website_info.default {
                 window.hide().unwrap();
+            } else {
+                current_id = i;
             }
             reset(&window);
             sub_menu = sub_menu.add_item(CustomMenuItem::new(label, website.name.clone()));
         }
+        *state.website.lock().unwrap() = Some(WebsiteState { current_id: Mutex::new(current_id), website_info: website_info.clone() });
 
         let tray_menu = SystemTrayMenu::new()
             .add_submenu(SystemTraySubmenu::new("Websites", sub_menu))
             .add_native_item(SystemTrayMenuItem::Separator)
             .add_item(CustomMenuItem::new("reset".to_string(), "Reset"))
             .add_item(CustomMenuItem::new("restart".to_string(), "Restart"))
-            .add_item(CustomMenuItem::new("hide".to_string(), "Hide"))
+            .add_item(CustomMenuItem::new("visible".to_string(), "Hide"))
             .add_native_item(SystemTrayMenuItem::Separator)
             .add_item(CustomMenuItem::new("quit".to_string(), "Quit"));
         let system_tray = SystemTray::new().with_menu(tray_menu);
@@ -169,24 +188,18 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
                 if websites_count < 1 {
                     continue;
                 }
-                let mut has_shown = false;
-                for i in 0..websites_count {
-                    let label = format!("window-{}", i);
-                    let window = handle.get_window(&label).unwrap();
-                    if has_shown {
-                        window.show().unwrap();
-                        has_shown = false;
-                        break;
-                    }
-                    if window.is_visible().unwrap() {
-                        has_shown = true;
-                        window.hide().unwrap();
-                    }
-                }
-                if !has_shown {
+                let state = handle.state::<AppState>();
+                if !*state.visible.lock().unwrap() {
                     continue;
                 }
-                handle.get_window("window-0").unwrap().show().unwrap();
+                let websites = state.website.lock().unwrap();
+                let mut current_id = websites.as_ref().unwrap().current_id.lock().unwrap();
+                let current_total = websites.as_ref().unwrap().website_info.websites.len();
+                let id = *current_id;
+                *current_id += 1;
+                *current_id %= current_total;
+                handle.get_window(&format!("window-{}", id)).unwrap().hide().unwrap();
+                handle.get_window(&format!("window-{}", (id + 1) % current_total)).unwrap().show().unwrap();
             }
         });
         Ok(())
@@ -198,6 +211,7 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 
 fn main() {
     tauri::Builder::default()
+        .manage(AppState { website: Default::default(), visible: Mutex::new(true) })
         .on_system_tray_event(system_tray_event_handler)
         .setup(setup_handler)
         .build(tauri::generate_context!())
