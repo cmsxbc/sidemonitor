@@ -185,7 +185,7 @@ fn setup_handler(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(duration));
                 let websites_count = handle.windows().len();
-                if websites_count < 1 {
+                if websites_count <= 1 {
                     continue;
                 }
                 let state = handle.state::<AppState>();
